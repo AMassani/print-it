@@ -3,6 +3,9 @@ using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.Drawing.Printing;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+
 using Microsoft.Extensions.Logging;
 using PrintIt.Core.Internal;
 using PrintIt.Core.Pdfium;
@@ -13,13 +16,14 @@ namespace PrintIt.Core
     internal sealed class PdfPrintService : IPdfPrintService
     {
         private readonly ILogger<PdfPrintService> _logger;
+        private static readonly ManualResetEvent ManualResetEvent = new ManualResetEvent(false);
 
         public PdfPrintService(ILogger<PdfPrintService> logger)
         {
             _logger = logger;
         }
 
-        public void Print(Stream pdfStream, string printerName, string pageRange = null, int numberOfCopies = 1)
+        public async Task Print(Stream pdfStream, string printerName, string pageRange = null, int numberOfCopies = 1)
         {
             if (pdfStream == null)
                 throw new ArgumentNullException(nameof(pdfStream));
@@ -33,7 +37,16 @@ namespace PrintIt.Core
             printDocument.PrinterSettings.Copies = (short)Math.Clamp(numberOfCopies, 1, short.MaxValue);
             PrintState state = PrintStateFactory.Create(document, pageRange);
             printDocument.PrintPage += (_, e) => PrintDocumentOnPrintPage(e, state);
+            printDocument.EndPrint += PrintDocument_EndPrint;
             printDocument.Print();
+            ManualResetEvent.WaitOne();
+            ManualResetEvent.Reset();
+            await Task.CompletedTask;
+        }
+
+        private void PrintDocument_EndPrint(object sender, PrintEventArgs e)
+        {
+            ManualResetEvent.Set();
         }
 
         private void PrintDocumentOnPrintPage(PrintPageEventArgs e, PrintState state)
@@ -51,6 +64,6 @@ namespace PrintIt.Core
 
     public interface IPdfPrintService
     {
-        void Print(Stream pdfStream, string printerName, string pageRange = null, int numberOfCopies = 1);
+        Task Print(Stream pdfStream, string printerName, string pageRange = null, int numberOfCopies = 1);
     }
 }
